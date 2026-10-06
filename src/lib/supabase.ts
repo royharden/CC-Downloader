@@ -11,7 +11,9 @@ export interface Transcript {
   video_id: string | null;
   title: string | null;
   transcript_text: string;
+  transcript_timestamped: string | null;
   cue_count: number;
+  duration_seconds: number | null;
   source: string;
   created_at: string;
 }

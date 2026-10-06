@@ -1,245 +1,216 @@
 /**
  * Content script that runs on MSN video pages.
- * Captions on MSN videos are loaded dynamically via the HTML5 <track> element
- * or through the TextTracks API on the <video> element. This script watches for
- * video elements and their text tracks, then extracts all available cues.
+ * MSN does not expose captions via the HTML5 <track> element or TextTracks API.
+ * Instead, the page data (available at runtime in window.__PRENDERED_STATE__
+ * or via the assets.msn.com content API) contains a videoMetadata.closedCaptions
+ * link to a TTML caption file, plus a full transcript in the `body` field.
  */
 
 (function () {
   'use strict';
 
-  /**
-   * Extract transcript text from a video element's text tracks.
-   * @param {HTMLVideoElement} video
-   * @returns {{text: string, cues: number, trackLabel: string} | null}
-   */
-  function extractFromVideo(video) {
-    if (!video || !video.textTracks || video.textTracks.length === 0) {
-      return null;
-    }
+  const CONTENT_API = 'https://assets.msn.com/content/view/v2/detail';
 
-    // Enable all text tracks so cues become available
-    for (let i = 0; i < video.textTracks.length; i++) {
-      const track = video.textTracks[i];
-      if (track.mode !== 'showing') {
-        track.mode = 'hidden'; // hidden mode still loads cues
-      }
-    }
-
-    // Try to find a captions or subtitles track
-    let bestTrack = null;
-    for (let i = 0; i < video.textTracks.length; i++) {
-      const t = video.textTracks[i];
-      if (t.kind === 'captions' || t.kind === 'subtitles') {
-        bestTrack = t;
-        break;
-      }
-    }
-    if (!bestTrack) bestTrack = video.textTracks[0];
-
-    const cues = bestTrack.cues;
-    if (!cues || cues.length === 0) {
-      return null;
-    }
-
-    let fullText = '';
-    let cueCount = 0;
-    for (let i = 0; i < cues.length; i++) {
-      const cue = cues[i];
-      if (cue.text) {
-        fullText += cue.text.replace(/<[^>]*>/g, '').trim() + '\n';
-        cueCount++;
-      }
-    }
-
-    if (cueCount === 0) return null;
-
-    return {
-      text: fullText.trim(),
-      cues: cueCount,
-      trackLabel: bestTrack.label || bestTrack.language || 'unknown',
-    };
-  }
-
-  /**
-   * Also try fetching VTT files directly from <track> src attributes.
-   * @param {HTMLVideoElement} video
-   * @returns {Promise<{text: string, cues: number, trackLabel: string} | null>}
-   */
-  async function extractFromTrackSrc(video) {
-    const trackElements = video.querySelectorAll('track');
-    for (const trackEl of trackElements) {
-      const src = trackEl.src;
-      if (!src) continue;
-      if (trackEl.kind && trackEl.kind !== 'captions' && trackEl.kind !== 'subtitles') continue;
-      try {
-        const resp = await fetch(src);
-        if (!resp.ok) continue;
-        const vttText = await resp.text();
-        const parsed = parseVTT(vttText);
-        if (parsed.cues > 0) {
-          return {
-            text: parsed.text,
-            cues: parsed.cues,
-            trackLabel: trackEl.label || trackEl.srclang || 'unknown',
-          };
-        }
-      } catch (e) {
-        // CORS or network error, skip
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Parse WebVTT file content into plain text.
-   * @param {string} vtt
-   * @returns {{text: string, cues: number}}
-   */
-  function parseVTT(vtt) {
-    const lines = vtt.split('\n');
-    let text = '';
-    let cueCount = 0;
-    let inCue = false;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      // Skip header
-      if (line.startsWith('WEBVTT')) continue;
-      // Skip metadata lines
-      if (line.startsWith('NOTE')) continue;
-      // Skip timestamp lines (cue identifiers or time ranges)
-      if (line.match(/^\d{2}:\d{2}/) || line.match(/^\d+$/)) {
-        inCue = true;
-        continue;
-      }
-      // Skip empty lines (cue separators)
-      if (line === '') {
-        inCue = false;
-        continue;
-      }
-      if (inCue) {
-        // Strip HTML tags from cue text
-        const clean = line.replace(/<[^>]*>/g, '').trim();
-        if (clean) {
-          // Avoid duplicate consecutive lines
-          if (!text.endsWith(clean + '\n')) {
-            text += clean + '\n';
-          }
-          cueCount++;
-        }
-      }
-    }
-
-    return { text: text.trim(), cues: cueCount };
-  }
-
-  /**
-   * Also try extracting TTML/DFXP format if present.
-   * @param {string} xml
-   * @returns {{text: string, cues: number}}
-   */
-  function parseTTML(xml) {
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(xml, 'text/xml');
-      const textEls = doc.getElementsByTagName('p');
-      let text = '';
-      let cueCount = 0;
-      for (let i = 0; i < textEls.length; i++) {
-        const clean = textEls[i].textContent.replace(/<[^>]*>/g, '').trim();
-        if (clean) {
-          text += clean + '\n';
-          cueCount++;
-        }
-      }
-      return { text: text.trim(), cues: cueCount };
-    } catch (e) {
-      return { text: '', cues: 0 };
-    }
-  }
-
-  /**
-   * Find all video elements on the page and try to extract captions.
-   * @returns {Promise<{text: string, cues: number, trackLabel: string} | null>}
-   */
-  async function extractTranscript() {
-    const videos = document.querySelectorAll('video');
-    if (videos.length === 0) {
-      return null;
-    }
-
-    for (const video of videos) {
-      // Method 1: Try TextTracks API
-      const fromTracks = extractFromVideo(video);
-      if (fromTracks && fromTracks.cues > 0) {
-        return fromTracks;
-      }
-
-      // Method 2: Try fetching VTT from <track> src
-      const fromSrc = await extractFromTrackSrc(video);
-      if (fromSrc && fromSrc.cues > 0) {
-        return fromSrc;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Get the video page title.
-   * @returns {string}
-   */
-  function getPageTitle() {
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    if (ogTitle && ogTitle.content) return ogTitle.content;
-    return document.title || '';
-  }
-
-  /**
-   * Extract video ID from MSN URL.
-   * @returns {string | null}
-   */
-  function getVideoId() {
-    const match = window.location.href.match(/\/vi-([A-Za-z0-9]+)/);
+  function extractVideoId() {
+    const match = window.location.href.match(/\/v[pi]-([A-Za-z0-9]+)/);
     return match ? match[1] : null;
   }
 
-  // Listen for messages from popup/background
+  function extractLocale() {
+    const m = window.location.pathname.match(/^\/([a-z]{2}-[a-z]{2})\//i);
+    return m ? m[1].toLowerCase() : 'en-us';
+  }
+
+  /**
+   * Parse TTML caption XML into plain + timestamped text.
+   */
+  function parseTTML(xml) {
+    const cues = [];
+    const cueRegex = /<p\b[^>]*\bbegin="([^"]*)"[^>]*>([\s\S]*?)<\/p\s*>/gi;
+    let match;
+    while ((match = cueRegex.exec(xml)) !== null) {
+      const raw = match[2]
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&amp;/g, '&')
+        .replace(/&#39;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (raw) cues.push({ begin: match[1], text: raw });
+    }
+
+    // Dedupe rolling-caption repeats for the plain transcript
+    const seen = new Set();
+    const lines = [];
+    for (const cue of cues) {
+      if (!seen.has(cue.text)) {
+        seen.add(cue.text);
+        lines.push(cue.text);
+      }
+    }
+
+    const stampLines = cues.map((c) => `[${fmt(c.begin)}] ${c.text}`);
+    return {
+      text: lines.join('\n').trim(),
+      timestamped: stampLines.join('\n').trim(),
+      cues: cues.length,
+    };
+  }
+
+  function fmt(ts) {
+    const parts = ts.split(':').map(parseFloat);
+    let s = 0;
+    if (parts.length === 3) s = parts[0] * 3600 + parts[1] * 60 + parts[2];
+    else if (parts.length === 2) s = parts[0] * 60 + parts[1];
+    else if (parts.length === 1) s = parts[0];
+    const total = Math.floor(s);
+    return (
+      String(Math.floor(total / 60)).padStart(2, '0') +
+      ':' +
+      String(total % 60).padStart(2, '0')
+    );
+  }
+
+  /**
+   * Try to read video data from the page's pre-rendered state,
+   * which MSN embeds as window.__PRENDERED_STATE__ JSON.
+   */
+  function readFromPageState() {
+    try {
+      const state = window.__PRENDERED_STATE__;
+      if (!state) return null;
+      // MSN nests content under _data > ... > contentMap
+      const candidates = [];
+      const dive = (obj, depth) => {
+        if (!obj || typeof obj !== 'object' || depth > 6) return;
+        if (obj.videoMetadata && (obj.videoMetadata.closedCaptions || obj.body)) {
+          candidates.push(obj);
+          return;
+        }
+        for (const key of Object.keys(obj)) {
+          dive(obj[key], depth + 1);
+        }
+      };
+      dive(state, 0);
+      return candidates[0] || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch the content API for this video ID.
+   */
+  async function fetchContent(videoId, locale) {
+    const urls = [
+      `${CONTENT_API}/${locale}/${videoId}`,
+      `${CONTENT_API}/${locale}/vi-${videoId}`,
+      `${CONTENT_API}/${locale}/vp-${videoId}`,
+    ];
+    for (const u of urls) {
+      try {
+        const resp = await fetch(u, {
+          headers: { Accept: 'application/json' },
+        });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        if (data && (data.videoMetadata || data.body)) return data;
+      } catch (e) {
+        // try next
+      }
+    }
+    return null;
+  }
+
+  async function extractTranscript() {
+    const videoId = extractVideoId();
+    if (!videoId) {
+      return {
+        success: false,
+        error: 'No video ID found in this page URL. Please use a full MSN video page URL.',
+      };
+    }
+    const locale = extractLocale();
+
+    // Preferred source: page state (no network needed, same-origin)
+    let content = readFromPageState();
+    if (!content) {
+      content = await fetchContent(videoId, locale);
+    }
+    if (!content) {
+      return {
+        success: false,
+        error:
+          'Could not reach the MSN video API for this video. It may have been removed.',
+      };
+    }
+
+    const title =
+      content.title || document.title.replace(/ \| Microsoft Network.*$/i, '') || '';
+    const durationSeconds = content.videoMetadata?.playTime ?? null;
+
+    let text = '';
+    let timestamped = '';
+    let cueCount = 0;
+    let trackLabel = '';
+
+    // Preferred: real closed-caption TTML file with timestamps
+    const captions = content.videoMetadata?.closedCaptions || [];
+    const preferred =
+      captions.find((c) => (c.locale || '').toLowerCase() === locale) || captions[0];
+
+    if (preferred && preferred.href) {
+      try {
+        const resp = await fetch(preferred.href);
+        if (resp.ok) {
+          const xml = await resp.text();
+          const parsed = parseTTML(xml);
+          if (parsed.cues > 0) {
+            text = parsed.text;
+            timestamped = parsed.timestamped;
+            cueCount = parsed.cues;
+            trackLabel = preferred.locale || 'captions';
+          }
+        }
+      } catch (e) {
+        // fall through to body transcript
+      }
+    }
+
+    // Fallback: transcript in the body field
+    if (cueCount === 0 && content.body) {
+      text = content.body.trim();
+      cueCount = text.split(/[.!?]\s/).filter(Boolean).length;
+      trackLabel = 'transcript';
+    }
+
+    if (cueCount === 0 || !text) {
+      return {
+        success: false,
+        error: 'This video has no closed captions or transcript available.',
+      };
+    }
+
+    return {
+      success: true,
+      transcript: text,
+      timestamped,
+      cueCount,
+      trackLabel,
+      title,
+      durationSeconds,
+      videoId,
+      url: window.location.href,
+    };
+  }
+
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'extractTranscript') {
-      extractTranscript().then((result) => {
-        if (result) {
-          sendResponse({
-            success: true,
-            transcript: result.text,
-            cueCount: result.cues,
-            trackLabel: result.trackLabel,
-            title: getPageTitle(),
-            videoId: getVideoId(),
-            url: window.location.href,
-          });
-        } else {
-          sendResponse({
-            success: false,
-            error: 'No captions or subtitles were found on this video. The video may not have closed captions enabled, or captions may load after playback starts. Try playing the video briefly and then clicking Extract again.',
-          });
-        }
-      });
+      extractTranscript().then(sendResponse);
       return true; // async response
     }
   });
-
-  // Also watch for dynamically added video elements (MSN loads videos async)
-  const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (node.nodeName === 'VIDEO' || (node.querySelectorAll && node.querySelectorAll('video').length > 0)) {
-          // Video element found, but we don't auto-extract; wait for popup request
-          break;
-        }
-      }
-    }
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
 })();

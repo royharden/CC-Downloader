@@ -28,7 +28,9 @@ async function saveToSupabase(data) {
         video_id: data.videoId,
         title: data.title,
         transcript_text: data.transcript,
+        transcript_timestamped: data.timestamped || null,
         cue_count: data.cueCount,
+        duration_seconds: data.durationSeconds ?? null,
         source: data.source || 'extension',
       }),
     });

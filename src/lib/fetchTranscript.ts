@@ -6,7 +6,10 @@ export interface FetchResult {
   title: string | null;
   videoId: string | null;
   transcript: string;
+  timestamped: string;
   cueCount: number;
+  trackLabel: string;
+  durationSeconds: number | null;
   saved: boolean;
   error?: string;
 }

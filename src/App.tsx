@@ -26,6 +26,7 @@ export default function App() {
   const [urlInput, setUrlInput] = useState('');
   const [urlFetching, setUrlFetching] = useState(false);
   const [urlMessage, setUrlMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [showTimestamps, setShowTimestamps] = useState(false);
 
   const fetchTranscripts = useCallback(async () => {
     setLoading(true);
@@ -102,6 +103,17 @@ export default function App() {
   const wordCount = (text: string) =>
     text.split(/\s+/).filter(Boolean).length;
 
+  const formatDuration = (seconds: number | null) => {
+    if (!seconds) return null;
+    const mm = Math.floor(seconds / 60);
+    const ss = seconds % 60;
+    const hh = Math.floor(mm / 60);
+    if (hh > 0) {
+      return `${hh}:${String(mm % 60).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+    }
+    return `${mm}:${String(ss).padStart(2, '0')}`;
+  };
+
   const handleFetchFromUrl = async () => {
     if (!urlInput.trim()) return;
     if (!urlInput.includes('msn.com')) {
@@ -115,7 +127,7 @@ export default function App() {
       if (result.success) {
         setUrlMessage({
           type: 'success',
-          text: `Extracted ${result.cueCount} captions and saved to your library.`,
+          text: `Extracted ${result.cueCount} captions${result.trackLabel ? ' (' + result.trackLabel + ')' : ''} and saved to your library.`,
         });
         setUrlInput('');
         fetchTranscripts();
@@ -361,13 +373,38 @@ export default function App() {
                       {selected.cue_count} cues
                     </span>
                     <span>{wordCount(selected.transcript_text)} words</span>
+                    {formatDuration(selected.duration_seconds) && (
+                      <span>{formatDuration(selected.duration_seconds)} long</span>
+                    )}
                   </div>
                 </div>
+
+                {/* Timestamp toggle */}
+                {selected.transcript_timestamped && (
+                  <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
+                    <span className="text-xs text-slate-500">
+                      {showTimestamps ? 'Showing timestamps' : 'Plain text'}
+                    </span>
+                    <button
+                      onClick={() => setShowTimestamps(!showTimestamps)}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        showTimestamps
+                          ? 'bg-sky-500/20 text-sky-300'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      {showTimestamps ? 'Hide timestamps' : 'Show timestamps'}
+                    </button>
+                  </div>
+                )}
 
                 {/* Transcript text */}
                 <div className="p-5 max-h-[calc(100vh-320px)] overflow-y-auto">
                   <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">
-                    {selected.transcript_text}
+                    {showTimestamps && selected.transcript_timestamped
+                      ? selected.transcript_timestamped
+                      : selected.transcript_text}
                   </p>
                 </div>
               </div>
