@@ -1,0 +1,2 @@
+[functions.fetch-transcript]
+verify_jwt = false
