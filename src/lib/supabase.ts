@@ -14,6 +14,13 @@ export interface Transcript {
   transcript_timestamped: string | null;
   cue_count: number;
   duration_seconds: number | null;
+  cue_data: Cue[] | null;
   source: string;
   created_at: string;
+}
+
+export interface Cue {
+  start: number;
+  end: number;
+  text: string;
 }

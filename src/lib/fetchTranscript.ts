@@ -8,6 +8,7 @@ export interface FetchResult {
   transcript: string;
   timestamped: string;
   cueCount: number;
+  cueData: { start: number; end: number; text: string }[] | null;
   trackLabel: string;
   durationSeconds: number | null;
   saved: boolean;

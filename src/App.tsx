@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase, type Transcript } from '@/lib/supabase';
+import { supabase, type Transcript, type Cue } from '@/lib/supabase';
 import { fetchTranscriptFromUrl } from '@/lib/fetchTranscript';
+import { toSRT, toVTT, downloadFile, safeFilename } from '@/lib/subtitles';
 import {
   FileText,
   Search,
@@ -14,6 +15,7 @@ import {
   Video,
   Link2,
   Loader2,
+  Youtube,
 } from 'lucide-react';
 
 export default function App() {
@@ -58,16 +60,22 @@ export default function App() {
   };
 
   const handleDownload = (transcript: Transcript) => {
-    const title = (transcript.title || 'transcript')
-      .replace(/[^a-z0-9]/gi, '_')
-      .toLowerCase();
-    const blob = new Blob([transcript.transcript_text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = title + '.txt';
-    a.click();
-    URL.revokeObjectURL(url);
+    const name = safeFilename(transcript.title);
+    downloadFile(transcript.transcript_text, name + '.txt', 'text/plain');
+  };
+
+  const handleDownloadSRT = (transcript: Transcript) => {
+    const cues = transcript.cue_data as Cue[] | null;
+    if (!cues || cues.length === 0) return;
+    const name = safeFilename(transcript.title);
+    downloadFile(toSRT(cues), name + '.srt', 'application/x-subrip');
+  };
+
+  const handleDownloadVTT = (transcript: Transcript) => {
+    const cues = transcript.cue_data as Cue[] | null;
+    if (!cues || cues.length === 0) return;
+    const name = safeFilename(transcript.title);
+    downloadFile(toVTT(cues), name + '.vtt', 'text/vtt');
   };
 
   const handleDelete = async (id: string) => {
@@ -116,18 +124,28 @@ export default function App() {
 
   const handleFetchFromUrl = async () => {
     if (!urlInput.trim()) return;
-    if (!urlInput.includes('msn.com')) {
-      setUrlMessage({ type: 'error', text: 'Please enter an MSN video URL.' });
+    const trimmed = urlInput.trim();
+    const isSupported =
+      trimmed.includes('msn.com') ||
+      trimmed.includes('youtube.com') ||
+      trimmed.includes('youtu.be');
+    if (!isSupported) {
+      setUrlMessage({
+        type: 'error',
+        text: 'Please enter an MSN or YouTube video URL.',
+      });
       return;
     }
     setUrlFetching(true);
     setUrlMessage(null);
     try {
-      const result = await fetchTranscriptFromUrl(urlInput.trim(), true);
+      const result = await fetchTranscriptFromUrl(trimmed, true);
       if (result.success) {
         setUrlMessage({
           type: 'success',
-          text: `Extracted ${result.cueCount} captions${result.trackLabel ? ' (' + result.trackLabel + ')' : ''} and saved to your library.`,
+          text: `Extracted ${result.cueCount} captions${
+            result.trackLabel ? ' (' + result.trackLabel + ')' : ''
+          } and saved to your library.`,
         });
         setUrlInput('');
         fetchTranscripts();
@@ -187,7 +205,7 @@ export default function App() {
           <div className="flex gap-3">
             <input
               type="url"
-              placeholder="Paste an MSN video URL (e.g. https://www.msn.com/en-us/.../vi-...)"
+              placeholder="Paste an MSN or YouTube video URL..."
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !urlFetching && handleFetchFromUrl()}
@@ -342,8 +360,24 @@ export default function App() {
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-colors"
                       >
                         <Download className="w-3.5 h-3.5" />
-                        Download
+                        TXT
                       </button>
+                      {selected.cue_data && (
+                        <>
+                          <button
+                            onClick={() => handleDownloadSRT(selected)}
+                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-colors"
+                          >
+                            SRT
+                          </button>
+                          <button
+                            onClick={() => handleDownloadVTT(selected)}
+                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-colors"
+                          >
+                            VTT
+                          </button>
+                        </>
+                      )}
                       <button
                         onClick={() => handleDelete(selected.id)}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium transition-colors"

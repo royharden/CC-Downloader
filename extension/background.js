@@ -10,7 +10,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJib2x0
 
 /**
  * Save transcript to Supabase.
- * @param {{url: string, videoId: string, title: string, transcript: string, cueCount: number, source: string}} data
+ * @param {{url: string, videoId: string, title: string, transcript: string, timestamped: string, cueData: Array, cueCount: number, durationSeconds: number, source: string}} data
  * @returns {Promise<{success: boolean, error?: string, data?: any}>}
  */
 async function saveToSupabase(data) {
@@ -29,6 +29,7 @@ async function saveToSupabase(data) {
         title: data.title,
         transcript_text: data.transcript,
         transcript_timestamped: data.timestamped || null,
+        cue_data: Array.isArray(data.cueData) ? data.cueData : null,
         cue_count: data.cueCount,
         duration_seconds: data.durationSeconds ?? null,
         source: data.source || 'extension',

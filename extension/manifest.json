@@ -1,12 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "MSN Video Transcript Extractor",
-  "version": "1.0.0",
-  "description": "Extract transcripts and closed captions from MSN video pages.",
+  "name": "MSN & YouTube Video Transcript Extractor",
+  "version": "1.1.0",
+  "description": "Extract transcripts and closed captions from MSN and YouTube video pages.",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
     "https://*.msn.com/*",
-    "https://*.supabase.co/*"
+    "https://*.supabase.co/*",
+    "https://*.youtube.com/*",
+    "https://*.youtu.be/*",
+    "https://*.akamaized.net/*",
+    "https://*.googlevideo.com/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -23,7 +27,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.msn.com/*"],
+      "matches": ["https://*.msn.com/*", "https://*.youtube.com/*", "https://youtube.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
